@@ -21,7 +21,6 @@
 #include <linux/backlight.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
-#include <linux/types.h>
 #include <linux/workqueue.h>
 
 enum {
@@ -31,8 +30,8 @@ enum {
 	CMD_OLED_BRIGHTNESS,
 	CMD_OLED_REG_LOCK,
 	CMD_OLED_REG_UNLOCK,
-	CMD_CODE_RESERVED0,
-	CMD_CODE_RESERVED1,
+	CMD_CODE_DOZE_IN,
+	CMD_CODE_DOZE_OUT,
 	CMD_CODE_RESERVED2,
 	CMD_CODE_RESERVED3,
 	CMD_CODE_RESERVED4,
@@ -75,7 +74,7 @@ struct panel_info {
 	struct device_node *of_node;
 	struct drm_display_mode mode;
 	struct drm_display_mode *buildin_modes;
-	int num_biuldin_modes;
+	int num_buildin_modes;
 	struct gpio_desc *avdd_gpio;
 	struct gpio_desc *avee_gpio;
 	struct gpio_desc *reset_gpio;
@@ -96,6 +95,9 @@ struct panel_info {
 	u32 lanes;
 	u32 mode_flags;
 	bool use_dcs;
+
+	/* delay time between set lcd avdd and avee */
+	u32 power_gpio_delay;
 };
 
 struct sprd_panel {
@@ -107,13 +109,14 @@ struct sprd_panel {
 	struct regulator *supply;
 	struct delayed_work esd_work;
 	bool esd_work_pending;
+	bool esd_work_backup;
 	bool is_enabled;
 };
 
-struct sprd_backlight {
+struct sprd_oled {
 	struct backlight_device *bdev;
 	struct sprd_panel *panel;
-	struct dsi_cmd_desc *cmds[255];
+	struct dsi_cmd_desc *cmds[256];
 	int cmd_len;
 	int cmds_total;
 	int max_level;
@@ -121,5 +124,6 @@ struct sprd_backlight {
 
 int sprd_panel_parse_lcddtb(struct device_node *lcd_node,
 	struct sprd_panel *panel);
-
+void  sprd_panel_enter_doze(struct drm_panel *p);
+void  sprd_panel_exit_doze(struct drm_panel *p);
 #endif
