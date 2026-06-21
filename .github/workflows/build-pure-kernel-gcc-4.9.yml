@@ -45,7 +45,6 @@ jobs:
           aarch64-linux-android-gcc --version
           aarch64-linux-android-gcc -fstack-protector-strong -c -x c /dev/null -o /dev/null
 
-     
       - name: Build kernel
         run: |
           export ARCH=arm64
@@ -68,8 +67,6 @@ jobs:
          
           KCFLAGS="-Wno-error"
           make -j$(nproc) KCFLAGS="$KCFLAGS" 2>&1 | tee build.log
-
-         
 
       - name: Locate pure kernel image
         id: find_kernel
@@ -94,30 +91,26 @@ jobs:
             -F "caption=❌ Build failed: kernel image not found. See build.log for details." \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
           exit 1
-      - name: Prepare AnyKernel3 (flattened modules)
+
+      # 立即创建 Release 并上传内核镜像（即使后续步骤失败，镜像也已保存）
+      - name: Create Release and upload kernel image
         env:
-          KERNEL_RELEASE: ${{ env.KERNEL_RELEASE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone --depth=1 https://github.com/ZeroDreamCat/sprd_ak3.git anykernel
-          rm -rf anykernel/.git anykernel/{README.md,ramdisk,patch}
-          rm -rf anykernel/modules/system
+          TAG="build-${{ github.run_id }}"
+          # 尝试创建 Release（若 tag 已存在则忽略错误）
+          gh release create "$TAG" \
+            --title "Build - ${{ github.sha }} (${{ github.ref_name }})" \
+            --prerelease \
+            --notes "Auto-built from commit ${{ github.sha }}" \
+            --target "${{ github.sha }}" || true
+          # 上传内核镜像（覆盖同名的旧文件）
+          gh release upload "$TAG" "${{ steps.find_kernel.outputs.kernel_path }}" --clobber
 
-          cp "${{ steps.find_kernel.outputs.kernel_path }}" anykernel/
-
-          MODULES_FLAT="anykernel/modules/vendor/lib/modules"
-          mkdir -p "${MODULES_FLAT}"
-          find modules_out/lib/modules/${KERNEL_RELEASE} -name "*.ko" \
-            -exec cp {} "${MODULES_FLAT}/" \;
-
-          cd anykernel
-          zip -r9 ../AnyKernel3.zip .
-          cd ..
-
-     
       - name: gzip vmlinux
         run: gzip -9 vmlinux
 
-      - name: Package all artifacts for Telegram (exclude vmlinux.gz)
+      - name: Package all artifacts for Telegram
         run: |
           mkdir -p telegram_artifacts
           cp ${{ steps.find_kernel.outputs.kernel_path }} telegram_artifacts/
@@ -130,21 +123,18 @@ jobs:
           echo "Created all_artifacts.zip (without vmlinux.gz)"
           ls -lh all_artifacts.zip
 
-      - name: Create Release and Upload Artifacts
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: build-${{ github.run_id }}
-          name: Build - ${{ github.sha }} (${{ github.ref_name }})
-          files: |
-            ${{ steps.find_kernel.outputs.kernel_path }}
-            modules.tar.gz
-            modules.zip
-            AnyKernel3.zip
-            build.log
-            System.map
-            Module.symvers
-            vmlinux.gz
-          draft: false
-          prerelease: true
+      # 上传剩余产物（无论之前步骤是否失败，都会尝试上传已有文件）
+      - name: Upload remaining artifacts to Release
+        if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="build-${{ github.run_id }}"
+          for file in modules.tar.gz modules.zip AnyKernel3.zip build.log System.map Module.symvers vmlinux.gz all_artifacts.zip; do
+            if [ -f "$file" ]; then
+              echo "Uploading $file ..."
+              gh release upload "$TAG" "$file" --clobber
+            else
+              echo "Warning: $file not found, skipping"
+            fi
+          done
