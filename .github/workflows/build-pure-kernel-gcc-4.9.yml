@@ -94,6 +94,24 @@ jobs:
             -F "caption=❌ Build failed: kernel image not found. See build.log for details." \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
           exit 1
+      - name: Prepare AnyKernel3 (flattened modules)
+        env:
+          KERNEL_RELEASE: ${{ env.KERNEL_RELEASE }}
+        run: |
+          git clone --depth=1 https://github.com/ZeroDreamCat/sprd_ak3.git anykernel
+          rm -rf anykernel/.git anykernel/{README.md,ramdisk,patch}
+          rm -rf anykernel/modules/system
+
+          cp "${{ steps.find_kernel.outputs.kernel_path }}" anykernel/
+
+          MODULES_FLAT="anykernel/modules/vendor/lib/modules"
+          mkdir -p "${MODULES_FLAT}"
+          find modules_out/lib/modules/${KERNEL_RELEASE} -name "*.ko" \
+            -exec cp {} "${MODULES_FLAT}/" \;
+
+          cd anykernel
+          zip -r9 ../AnyKernel3.zip .
+          cd ..
 
      
       - name: gzip vmlinux
